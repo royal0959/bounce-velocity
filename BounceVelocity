@@ -5,10 +5,6 @@ local RS = game:GetService("RunService")
 
 local activeVelocities = {}
 
-function rotateVectorAround(v, amount, axis)
-	return CFrame.fromAxisAngle(axis, amount):VectorToWorldSpace(v)
-end
-
 function module.new(parent)
 	local self = setmetatable({}, module)
 
@@ -20,11 +16,10 @@ function module.new(parent)
 	self.CollisionSize = self.Parent.Size 
 	self.IgnoreList = {}
 
-	self.RotateCollision = true
-	self.UseCollisionSize = true
 	self.AffectedByGravity = false
 	self.LoseMomentumOvertime = false
-	self.Gravity = workspace.Gravity
+	self.MomentumDeceleration = Vector3.new(10, 10, 10)
+	self.Gravity = 1
 
 	activeVelocities[self] = self
 
@@ -77,38 +72,79 @@ function module:GetNextRayFaceDirection()
 	return direction
 end
 
+function module:Decelerate(multiplier)
+	local deceleration = self.MomentumDeceleration * multiplier
+
+	if self.Velocity.X < 0 then 
+		deceleration = Vector3.new(-deceleration.X, deceleration.Y, deceleration.Z) 
+	end
+
+	if self.Velocity.Y < 0 then 
+		deceleration = Vector3.new(deceleration.X, -deceleration.Y, deceleration.Z) 
+	end
+
+	if self.Velocity.Z < 0 then 
+		deceleration = Vector3.new(deceleration.X, deceleration.Y, -deceleration.Z) 
+	end
+
+	local newVelocity = self.Velocity - deceleration
+
+	if self.Velocity.X ~= 0 then
+		if self.Velocity.X > 0 then
+			if newVelocity.X < 0 then
+				newVelocity = Vector3.new(0, newVelocity.Y, newVelocity.Z) 
+			end
+		else
+			if newVelocity.X > 0 then
+				newVelocity = Vector3.new(0, newVelocity.Y, newVelocity.Z) 
+			end
+		end
+	else
+		newVelocity = Vector3.new(0, newVelocity.Y, newVelocity.Z) 
+	end
+
+	if self.Velocity.Y ~= 0 then
+		if self.Velocity.Y > 0 then 
+			if newVelocity.Y < 0 then
+				Vector3.new(newVelocity.X, 0, newVelocity.Z)
+			end
+		else
+			if newVelocity.Y > 0 then
+				Vector3.new(newVelocity.X, 0, newVelocity.Z)
+			end
+		end
+	else
+		newVelocity = Vector3.new(newVelocity.X, 0, newVelocity.Z)
+	end
+
+	if self.Velocity.Z ~= 0 then
+		if self.Velocity.Z > 0 then 
+			if newVelocity.Z < 0 then
+				newVelocity = Vector3.new(newVelocity.X, newVelocity.Y, 0)
+			end
+		else
+			if newVelocity.Z > 0 then
+				newVelocity = Vector3.new(newVelocity.X, newVelocity.Y, 0)
+			end
+		end
+	else
+		newVelocity = Vector3.new(newVelocity.X, newVelocity.Y, 0)
+	end
+
+	self.Velocity = newVelocity
+end
+
 function module:Update()
-	local HB = RS.Heartbeat:Wait()
+	local dt = RS.Heartbeat:Wait()
 
 	local nextRayFaceDirection = self:GetNextRayFaceDirection()
 
-	local collisionSize = self.CollisionSize 
+	local collisionSize = self.CollisionSize / 2
 
-	local rotate = self.Parent.Orientation.Z
+	local nextPosition = self.Position + self.Velocity * dt 
 
-	if rotate < 0 then rotate = -rotate end
-	if rotate > 90 then rotate = 0 end
-
-	local nextPosition = self.Position + self.Velocity * HB 
-
-	if rotate > 0 then
-		collisionSize = rotateVectorAround(collisionSize, math.rad(rotate), nextRayFaceDirection)
-		if nextRayFaceDirection.Y == 1 or nextRayFaceDirection.Y == -1 then
-			collisionSize = rotateVectorAround(collisionSize, math.rad(rotate), nextRayFaceDirection) * 4
-		end
-	end
-
-	local ray = Ray.new(self.Position, (nextPosition - self.Position) * collisionSize)
-	local hit, hitpos, surfacenormal = workspace:FindPartOnRayWithIgnoreList(ray, {self.Parent, workspace.Effects, unpack(self.IgnoreList)})
-
-	local distance = (ray.Origin - hitpos).Magnitude
-	local p = Instance.new("Part")
-	p.Anchored = true
-	p.CanCollide = false
-	p.Size = Vector3.new(0.1, 0.1, distance)
-	p.CFrame = CFrame.lookAt(ray.Origin, hitpos)*CFrame.new(0, 0, -distance/2)
-	p.Parent = workspace.Effects
-	game:GetService("Debris"):AddItem(p, 0.01)
+	local ray = Ray.new(self.Position, (nextPosition - self.Position + (nextRayFaceDirection * collisionSize)))
+	local hit, hitpos, surfacenormal = workspace:FindPartOnRayWithIgnoreList(ray, {self.Parent, unpack(self.IgnoreList)})
 
 	if hit and self:CanCollide(hit) then 
 		local reflect = (self.Velocity - (2 * self.Velocity:Dot(surfacenormal) * surfacenormal))
@@ -116,18 +152,22 @@ function module:Update()
 		if not self.AffectedByGravity then
 			self.Velocity = reflect 
 		else
-			self.Velocity = reflect - Vector3.new(0, self.Gravity, 0)
-		end
+			self.Velocity = reflect - Vector3.new(0, self.Gravity, 0) 
 
-		if self.LoseMomentumOvertime then
-			self.Velocity -= Vector3.new(0, self.Gravity, 0)
+			if self.LoseMomentumOvertime then
+				self:Decelerate(dt * 100)
+			end
 		end
 	else
 		self.Position = nextPosition
 
-		if self.LoseMomentumOvertime then
-			self.Velocity -= Vector3.new(0, self.Gravity * HB, 0)
+		if self.AffectedByGravity then
+			self.Velocity -= Vector3.new(0, self.Gravity, 0)
 		end
+	end
+
+	if self.LoseMomentumOvertime then
+		self:Decelerate(dt)
 	end
 
 	self.Parent.Position = self.Position
