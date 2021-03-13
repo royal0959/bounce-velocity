@@ -8,8 +8,6 @@ local activeVelocities = {}
 function module.new(parent)
 	local self = setmetatable({}, module)
 
-	self._Connections = {}
-
 	self.Parent = parent
 	self.Velocity = Vector3.new()
 	self.Position = self.Parent.Position
