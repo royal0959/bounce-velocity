@@ -16,7 +16,9 @@ function module.new(parent)
 
 	self.AffectedByGravity = false
 	self.LoseMomentumOvertime = false
-	self.MomentumDeceleration = Vector3.new(10, 10, 10)
+	self.LoseMomentumEachBounce = false
+	self.MomentumDecelerationOvertime = Vector3.new(5, 5, 5)
+	self.MomentumDecelerationBounce = Vector3.new(50, 50, 50)
 	self.Gravity = 1
 
 	activeVelocities[self] = self
@@ -70,8 +72,8 @@ function module:GetNextRayFaceDirection()
 	return direction
 end
 
-function module:Decelerate(multiplier)
-	local deceleration = self.MomentumDeceleration * multiplier
+function module:Decelerate(multiplier, decelerationValue)
+	local deceleration = decelerationValue * multiplier
 
 	if self.Velocity.X < 0 then 
 		deceleration = Vector3.new(-deceleration.X, deceleration.Y, deceleration.Z) 
@@ -129,6 +131,16 @@ function module:Decelerate(multiplier)
 		newVelocity = Vector3.new(newVelocity.X, newVelocity.Y, 0)
 	end
 
+	--prevents a funky behavior where bounce object would moves ever so slightly up and down when its velocity should be at 0 
+	if newVelocity.Y > -2 and newVelocity.Y < -0.2 then
+		newVelocity = Vector3.new(newVelocity.X, 0, newVelocity.Z) 
+	end
+
+	if newVelocity.Y > 0 and newVelocity.Y < 0.1 then
+		newVelocity = Vector3.new(newVelocity.X, 0, newVelocity.Z) 
+	end
+
+
 	self.Velocity = newVelocity
 end
 
@@ -139,33 +151,33 @@ function module:Update()
 
 	local collisionSize = self.CollisionSize / 2
 
-	local nextPosition = self.Position + self.Velocity * dt 
+	local nextPosition = self.Position + self.Velocity * dt
 
 	local ray = Ray.new(self.Position, (nextPosition - self.Position + (nextRayFaceDirection * collisionSize)))
 	local hit, hitpos, surfacenormal = workspace:FindPartOnRayWithIgnoreList(ray, {self.Parent, unpack(self.IgnoreList)})
 
-	if hit and self:CanCollide(hit) then 
+	if hit and self:CanCollide(hit) and self.Velocity ~= Vector3.new() then 
 		local reflect = (self.Velocity - (2 * self.Velocity:Dot(surfacenormal) * surfacenormal))
 
 		if not self.AffectedByGravity then
 			self.Velocity = reflect 
 		else
 			self.Velocity = reflect - Vector3.new(0, self.Gravity, 0) 
+		end
 
-			if self.LoseMomentumOvertime then
-				self:Decelerate(dt * 100)
-			end
+		if self.LoseMomentumEachBounce then
+			self:Decelerate(dt, self.MomentumDecelerationBounce)
 		end
 	else
 		self.Position = nextPosition
 
-		if self.AffectedByGravity then
+		if self.AffectedByGravity and self.Velocity ~= Vector3.new() then
 			self.Velocity -= Vector3.new(0, self.Gravity, 0)
 		end
 	end
 
 	if self.LoseMomentumOvertime then
-		self:Decelerate(dt)
+		self:Decelerate(dt, self.MomentumDecelerationOvertime)
 	end
 
 	self.Parent.CFrame = CFrame.new(self.Position) * CFrame.Angles(math.rad(self.Parent.Orientation.X), math.rad(self.Parent.Orientation.Y), math.rad(self.Parent.Orientation.Z)) 
